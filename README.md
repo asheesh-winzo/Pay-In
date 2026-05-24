@@ -13,6 +13,7 @@ A production-ready REST API for transferring funds between accounts, built with 
 - [Design Decisions](#design-decisions)
 - [Error Handling](#error-handling)
 - [Scalability Notes & Future Improvements](#scalability-notes--future-improvements)
+- [Making It Production Ready](#making-it-production-ready)
 - [Common Docker Commands](#common-docker-commands)
 - [Time Spent & AI Tools Used](#time-spent--ai-tools-used)
 
@@ -276,7 +277,119 @@ A per-client rate limiter (e.g., using Symfony's `symfony/rate-limiter` with the
 
 ---
 
-## Common Docker Commands
+## Making It Production Ready
+
+This project is structured for a dev environment. Below is a checklist of what must be done before deploying to production.
+
+### 1. Move credentials out of `docker-compose.yml`
+
+Currently `docker-compose.yml` has hardcoded credentials:
+```yaml
+MYSQL_ROOT_PASSWORD: root_pass
+MYSQL_PASSWORD: app_pass
+```
+
+In production, reference environment variables instead:
+```yaml
+# docker-compose.yml
+environment:
+  MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+  MYSQL_USER: ${MYSQL_USER}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+```
+
+Then create a `.env` file (gitignored) on the server with real values, or inject them via your CI/CD secrets manager (GitHub Actions secrets, AWS Secrets Manager, etc.).
+
+---
+
+### 2. Never commit `.env` — use `.env.example` as the template
+
+`.env` is already gitignored in this repo. Anyone deploying should:
+```bash
+cp .env.example .env
+# then fill in real values
+```
+
+---
+
+### 3. Change `APP_SECRET` to a real random value
+
+```bash
+# Generate a strong secret
+php -r "echo bin2hex(random_bytes(32));"
+```
+
+Set the output as `APP_SECRET` in your production `.env`. Never use the placeholder value.
+
+---
+
+### 4. Set `APP_ENV=prod`
+
+```bash
+APP_ENV=prod
+```
+
+This enables:
+- Symfony's `fingers_crossed` log handler (only writes on error, prevents log flooding)
+- Compiled DI container (faster boot)
+- Disabled debug toolbar and profiler
+
+Pre-warm the cache during deployment:
+```bash
+php bin/console cache:warmup --env=prod
+```
+
+---
+
+### 5. Use strong, unique DB credentials
+
+Replace `app_pass` / `root_pass` with strong generated passwords. The MySQL root password should never be the same as the application user password.
+
+---
+
+### 6. Do not expose MySQL and Redis ports publicly
+
+In `docker-compose.yml`, the current config exposes:
+```yaml
+db:
+  ports:
+    - "3306:3306"   # ← remove in production
+redis:
+  ports:
+    - "6379:6379"   # ← remove in production
+```
+
+Remove these `ports` entries in production — DB and Redis should only be reachable internally between containers on the Docker network, never from the public internet.
+
+---
+
+### 7. Purge leaked secrets from git history (if needed)
+
+If `.env` was ever accidentally committed with real credentials:
+```bash
+# Requires git-filter-repo (brew install git-filter-repo)
+git filter-repo --path .env --invert-paths
+git push --force
+```
+
+Then rotate all leaked credentials immediately regardless.
+
+---
+
+### Summary Checklist
+
+| # | Task | Status |
+|---|---|---|
+| 1 | Move `docker-compose.yml` credentials to env vars | ⬜ |
+| 2 | Never commit `.env` — use `.env.example` | ✅ Already done |
+| 3 | Set a real `APP_SECRET` | ⬜ |
+| 4 | Set `APP_ENV=prod`, warmup cache | ⬜ |
+| 5 | Use strong DB passwords | ⬜ |
+| 6 | Remove DB/Redis port exposure | ⬜ |
+| 7 | Add authentication (JWT / API key) | ⬜ |
+| 8 | Set up HTTPS (SSL termination at Nginx or load balancer) | ⬜ |
+
+
 
 Quick reference for the most frequent tasks when working with the Docker environment.
 
