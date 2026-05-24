@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Repository\TransferTransactionRepository;
+use App\Util\Money;
 use Doctrine\ORM\Mapping as ORM;
 use Ramsey\Uuid\Uuid;
 
@@ -90,7 +91,7 @@ class TransferTransaction
     public function getSourceAccountId(): string { return $this->sourceAccountId; }
     public function getDestinationAccountId(): string { return $this->destinationAccountId; }
     public function getAmountMinorUnits(): int { return $this->amountMinorUnits; }
-    public function getAmountDecimal(): string { return number_format($this->amountMinorUnits / 100, 2, '.', ''); }
+    public function getAmountDecimal(): string { return Money::toDecimal($this->amountMinorUnits); }
     public function getCurrency(): string { return $this->currency; }
     public function getStatus(): string { return $this->status; }
     public function getDescription(): ?string { return $this->description; }

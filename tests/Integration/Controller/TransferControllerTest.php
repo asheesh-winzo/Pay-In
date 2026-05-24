@@ -233,4 +233,44 @@ final class TransferControllerTest extends WebTestCase
         // Same transaction ID returned both times
         $this->assertSame($first['data']['id'], $second['data']['id']);
     }
+
+    public function testShowTransferReturnsTransaction(): void
+    {
+        $client   = static::createClient();
+        $sourceId = $this->createAccount($client, 'show-source-owner', '200.00', 'EUR');
+        $destId   = $this->createAccount($client, 'show-dest-owner', '0.00', 'EUR');
+
+        $client->request('POST', '/api/v1/transfers', [], [], [
+            'CONTENT_TYPE'           => 'application/json',
+            'HTTP_X-Idempotency-Key' => 'test-key-show-transfer',
+        ], json_encode([
+            'source_account_id'      => $sourceId,
+            'destination_account_id' => $destId,
+            'amount'                 => '50.00',
+            'currency'               => 'EUR',
+        ]));
+
+        $this->assertResponseStatusCodeSame(Response::HTTP_CREATED);
+        $txId = json_decode($client->getResponse()->getContent(), true)['data']['id'];
+
+        $client->request('GET', '/api/v1/transfers/' . $txId);
+
+        $this->assertResponseStatusCodeSame(Response::HTTP_OK);
+        $body = json_decode($client->getResponse()->getContent(), true);
+        $this->assertSame('success', $body['status']);
+        $this->assertSame($txId, $body['data']['id']);
+        $this->assertSame('completed', $body['data']['status']);
+        $this->assertSame('50.00', $body['data']['amount']);
+        $this->assertSame('EUR', $body['data']['currency']);
+    }
+
+    public function testShowTransferReturns404ForUnknownId(): void
+    {
+        $client = static::createClient();
+        $client->request('GET', '/api/v1/transfers/00000000-0000-4000-a000-000000000099');
+
+        $this->assertResponseStatusCodeSame(Response::HTTP_NOT_FOUND);
+        $body = json_decode($client->getResponse()->getContent(), true);
+        $this->assertSame('error', $body['status']);
+    }
 }

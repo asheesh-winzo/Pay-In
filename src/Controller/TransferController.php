@@ -28,6 +28,24 @@ final class TransferController extends AbstractController
         private readonly LoggerInterface $logger,
     ) {}
 
+    #[Route('/transfers/{id}', name: 'transfer_show', methods: ['GET'])]
+    public function show(string $id): JsonResponse
+    {
+        $transaction = $this->transferService->findById($id);
+
+        if ($transaction === null) {
+            return $this->json([
+                'status'  => 'error',
+                'message' => sprintf('Transaction "%s" not found.', $id),
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        return $this->json([
+            'status' => 'success',
+            'data'   => $this->serializeTransaction($transaction),
+        ]);
+    }
+
     #[Route('/transfers', name: 'transfer_create', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
