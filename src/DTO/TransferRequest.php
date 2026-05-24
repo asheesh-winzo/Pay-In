@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\DTO;
 
+use App\Util\Money;
 use Symfony\Component\Validator\Constraints as Assert;
 
 final class TransferRequest
@@ -34,9 +35,6 @@ final class TransferRequest
 
     public function getAmountMinorUnits(): int
     {
-        [$whole, $fraction] = array_pad(explode('.', $this->amount, 2), 2, '0');
-        $fraction = str_pad(substr($fraction, 0, 2), 2, '0');
-
-        return (int) ($whole . $fraction);
+        return Money::toMinorUnits($this->amount);
     }
 }

@@ -22,13 +22,14 @@ A production-ready REST API for transferring funds between accounts, built with 
 ## Architecture Overview
 
 ```
-POST /api/v1/transfers
+HTTP Request
         │
         ▼
-TransferController          ← validates input (DTO + Symfony Validator)
-        │                   ← checks X-Idempotency-Key header
+TransferController          ← parses input, validates DTO (Symfony Validator)
+        │                   ← checks X-Idempotency-Key header, maps exceptions → HTTP codes
         ▼
 TransferService
+  ├── findById()                ← retrieve transaction by ID
   ├── Redis idempotency check   ← returns cached result if key already processed
   ├── Redis distributed lock    ← prevents race conditions (two concurrent transfers
   │                               on the same account)
@@ -102,6 +103,18 @@ X-Idempotency-Key: <unique-client-generated-uuid>
 - `500 Internal Server Error` — unexpected failure (logged)
 
 **Idempotency:** Sending the same `X-Idempotency-Key` twice will return the original transaction without executing the transfer again. The result is cached in Redis for 24 hours and falls back to a database lookup.
+
+---
+
+### Get Transfer
+
+```
+GET /api/v1/transfers/{id}
+```
+
+**Responses:**
+- `200 OK` — transaction details
+- `404 Not Found` — transaction not found
 
 ---
 
@@ -189,7 +202,7 @@ tests/
 │   └── Service/TransferServiceTest.php — idempotency, same-account guard (mocked deps)
 └── Integration/
     ├── Controller/AccountControllerTest.php   — full HTTP lifecycle for accounts
-    └── Controller/TransferControllerTest.php  — full HTTP lifecycle for transfers
+    └── Controller/TransferControllerTest.php  — create, show, idempotency, error cases
 ```
 
 Integration tests use [`dama/doctrine-test-bundle`](https://github.com/dmaicher/doctrine-test-bundle) to wrap every test in a transaction that is rolled back after each test — leaving the database clean.

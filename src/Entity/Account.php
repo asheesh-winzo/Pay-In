@@ -6,6 +6,7 @@ namespace App\Entity;
 
 use App\Exception\InsufficientFundsException;
 use App\Repository\AccountRepository;
+use App\Util\Money;
 use Doctrine\ORM\Mapping as ORM;
 use Ramsey\Uuid\Uuid;
 
@@ -67,7 +68,7 @@ class Account
 
     public function getBalanceDecimal(): string
     {
-        return number_format($this->balanceMinorUnits / 100, 2, '.', '');
+        return Money::toDecimal($this->balanceMinorUnits);
     }
 
     public function debit(int $amountMinorUnits): void

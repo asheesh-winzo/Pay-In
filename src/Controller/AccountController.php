@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
-use App\Entity\Account;
-use App\Repository\AccountRepository;
-use App\Repository\TransferTransactionRepository;
-use Doctrine\ORM\EntityManagerInterface;
+use App\Exception\AccountNotFoundException;
+use App\Service\AccountService;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -15,17 +15,14 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
-use Psr\Log\LoggerInterface;
 
 #[Route('/api/v1/accounts', name: 'api_v1_accounts_')]
 final class AccountController extends AbstractController
 {
     public function __construct(
-        private readonly AccountRepository $accountRepository,
-        private readonly TransferTransactionRepository $transactionRepository,
-        private readonly EntityManagerInterface $entityManager,
+        private readonly AccountService $accountService,
         private readonly ValidatorInterface $validator,
+        private readonly LoggerInterface $logger,
     ) {}
 
     #[Route('', name: 'create', methods: ['POST'])]
@@ -35,14 +32,14 @@ final class AccountController extends AbstractController
 
         if (!is_array($data)) {
             return $this->json([
-                'status' => 'error',
-                'message' => 'Request body must be valid JSON.'
+                'status'  => 'error',
+                'message' => 'Request body must be valid JSON.',
             ], Response::HTTP_BAD_REQUEST);
         }
 
-        $ownerId  = (string)($data['owner_id'] ?? '');
-        $balance  = (string)($data['initial_balance'] ?? '0.00');
-        $currency = strtoupper((string)($data['currency'] ?? 'EUR'));
+        $ownerId  = (string) ($data['owner_id'] ?? '');
+        $balance  = (string) ($data['initial_balance'] ?? '0.00');
+        $currency = strtoupper((string) ($data['currency'] ?? 'EUR'));
 
         $violations = $this->validator->validate($ownerId, [
             new Assert\NotBlank(),
@@ -51,62 +48,60 @@ final class AccountController extends AbstractController
 
         if (count($violations) > 0) {
             return $this->json([
-                'status' => 'error',
-                'message' => 'owner_id is required.'
+                'status'  => 'error',
+                'message' => 'owner_id is required.',
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        [$whole, $fraction] = array_pad(explode('.', $balance, 2), 2, '0');
-        $fraction = str_pad(substr($fraction, 0, 2), 2, '0');
-        $balanceMinorUnits = (int)($whole . $fraction);
-
-        $account = new Account($ownerId, $balanceMinorUnits, $currency);
-
         try {
-            $this->entityManager->persist($account);
-            $this->entityManager->flush();
-        } catch (UniqueConstraintViolationException $e) {
+            $account = $this->accountService->create($ownerId, $currency, $balance);
+        } catch (UniqueConstraintViolationException) {
             return $this->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => sprintf('Account with owner_id "%s" already exists.', $ownerId),
             ], Response::HTTP_CONFLICT);
+        } catch (\Throwable $e) {
+            $this->logger->error('Unexpected error creating account', ['exception' => $e]);
+
+            return $this->json([
+                'status'  => 'error',
+                'message' => 'An internal error occurred.',
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
 
         return $this->json([
             'status' => 'success',
-            'data' => [
-                'id' => $account->getId(),
-                'owner_id' => $account->getOwnerId(),
-                'balance' => $account->getBalanceDecimal(),
-                'currency' => $account->getCurrency(),
-                'is_active' => $account->isActive(),
-                'created_at' => $account->getCreatedAt()->format(\DateTimeInterface::ATOM),
-            ]
+            'data'   => $this->serializeAccount($account),
         ], Response::HTTP_CREATED);
     }
 
     #[Route('/{id}', name: 'show', methods: ['GET'])]
     public function show(string $id): JsonResponse
     {
-        $account = $this->accountRepository->findActiveById($id);
-
-        if ($account === null) {
+        try {
+            $account = $this->accountService->getActiveById($id);
+        } catch (AccountNotFoundException $e) {
             return $this->json([
-                'status' => 'error',
-                'message' => 'Account not found.'
+                'status'  => 'error',
+                'message' => $e->getMessage(),
             ], Response::HTTP_NOT_FOUND);
         }
 
         return $this->json([
             'status' => 'success',
-            'data' => [
-                'id' => $account->getId(),
-                'owner_id' => $account->getOwnerId(),
-                'balance' => $account->getBalanceDecimal(),
-                'currency' => $account->getCurrency(),
-                'is_active' => $account->isActive(),
-                'created_at' => $account->getCreatedAt()->format(\DateTimeInterface::ATOM),
-            ]
+            'data'   => $this->serializeAccount($account),
         ]);
+    }
+
+    private function serializeAccount(\App\Entity\Account $account): array
+    {
+        return [
+            'id'         => $account->getId(),
+            'owner_id'   => $account->getOwnerId(),
+            'balance'    => $account->getBalanceDecimal(),
+            'currency'   => $account->getCurrency(),
+            'is_active'  => $account->isActive(),
+            'created_at' => $account->getCreatedAt()->format(\DateTimeInterface::ATOM),
+        ];
     }
 }
